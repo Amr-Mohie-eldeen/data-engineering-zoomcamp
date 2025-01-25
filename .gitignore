@@ -1,2 +1,3 @@
 1_module/ny_taxi_postgres_data
 *.csv
+*/.DS_Store

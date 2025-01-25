@@ -16,66 +16,70 @@ def main(params):
     host = params.host
     port = params.port
     db = params.db
-    table_name = params.table_name
-    url = params.url
+    table_name_1 = params.table_name_1
+    table_name_2 = params.table_name_2
+    url1 = "https://github.com/DataTalksClub/nyc-tlc-data/releases/download/green/green_tripdata_2019-10.csv.gz"
+    url2 = "https://github.com/DataTalksClub/nyc-tlc-data/releases/download/misc/taxi_zone_lookup.csv"
+    csv1 = "green_tripdata_2019-10.csv.gz"
+    csv2 = "taxi_zone_lookup.csv"
 
-    # the backup files are gzipped, and it's important to keep the correct extension
-    # for pandas to be able to open the file
-    if url.endswith(".csv.gz"):
-        csv_name = "output.csv.gz"
+    # download the CSV files
+    print("checking files")
+    csv1_exists = os.path.exists(csv1)
+    csv2_exists = os.path.exists(csv2)
+    if csv1_exists:
+        print("csv1 - trips already exists")
     else:
-        csv_name = "output.csv"
+        print("downloading csv1 - trips")
+        os.system(f"wget {url1} -O {csv1}")
+        csv1_exists = os.path.exists(csv1)
+    if csv2_exists:
+        print("csv2 - zones already exists")
+    else:
+        print("downloading csv2 - zones")
+        os.system(f"wget {url2} -O {csv2}")
+    print("finished downloading files")
 
-    os.system(f"wget {url} -O {csv_name}")
-
+    # create db connection
     engine = create_engine(f"postgresql://{user}:{password}@{host}:{port}/{db}")
 
-    df_iter = pd.read_csv(csv_name, iterator=True, chunksize=100000)
-
+    # trips
+    print("inserting trips to database")
+    df_iter = pd.read_csv(csv1, iterator=True, chunksize=100000)
     df = next(df_iter)
+    df.lpep_pickup_datetime = pd.to_datetime(df.lpep_pickup_datetime)
+    df.lpep_dropoff_datetime = pd.to_datetime(df.lpep_dropoff_datetime)
+    df.head(n=0).to_sql(name=table_name_1, con=engine, if_exists="replace")
+    df.to_sql(name=table_name_1, con=engine, if_exists="append")
+    for chunk in df_iter:
+        t_start = time()
+        df = chunk
+        df.lpep_pickup_datetime = pd.to_datetime(df.lpep_pickup_datetime)
+        df.lpep_dropoff_datetime = pd.to_datetime(df.lpep_dropoff_datetime)
+        df.to_sql(name=table_name_1, con=engine, if_exists="append")
+        t_end = time()
+        print("inserted another chunk, took %.3f second" % (t_end - t_start))
+    print("finished inserting trips to database")
 
-    df.tpep_pickup_datetime = pd.to_datetime(df.tpep_pickup_datetime)
-    df.tpep_dropoff_datetime = pd.to_datetime(df.tpep_dropoff_datetime)
-
-    df.head(n=0).to_sql(name=table_name, con=engine, if_exists="replace")
-
-    df.to_sql(name=table_name, con=engine, if_exists="append")
-
-    while True:
-
-        try:
-            t_start = time()
-
-            df = next(df_iter)
-
-            df.tpep_pickup_datetime = pd.to_datetime(df.tpep_pickup_datetime)
-            df.tpep_dropoff_datetime = pd.to_datetime(df.tpep_dropoff_datetime)
-
-            df.to_sql(name=table_name, con=engine, if_exists="append")
-
-            t_end = time()
-
-            print("inserted another chunk, took %.3f second" % (t_end - t_start))
-
-        except StopIteration:
-            print("Finished ingesting data into the postgres database")
-            break
+    # zones
+    print("inserting zones to database")
+    df = pd.read_csv(csv2)
+    df.to_sql(name=table_name_2, con=engine, if_exists="append")
+    print("finished inserting zones to database")
 
 
 if __name__ == "__main__":
+    # Parse the command line arguments and calls the main program
     parser = argparse.ArgumentParser(description="Ingest CSV data to Postgres")
 
-    parser.add_argument("--user", required=True, help="user name for postgres")
-    parser.add_argument("--password", required=True, help="password for postgres")
-    parser.add_argument("--host", required=True, help="host for postgres")
-    parser.add_argument("--port", required=True, help="port for postgres")
-    parser.add_argument("--db", required=True, help="database name for postgres")
-    parser.add_argument(
-        "--table_name",
-        required=True,
-        help="name of the table where we will write the results to",
-    )
-    parser.add_argument("--url", required=True, help="url of the csv file")
+    parser.add_argument("--user", help="user name for postgres")
+    parser.add_argument("--password", help="password for postgres")
+    parser.add_argument("--host", help="host for postgres")
+    parser.add_argument("--port", help="port for postgres")
+    parser.add_argument("--db", help="database name for postgres")
+    parser.add_argument("--table_name_1", help="name of the table for trips")
+    parser.add_argument("--table_name_2", help="name of the table for zones")
+    # parser.add_argument('--url', help='url of the csv file')
 
     args = parser.parse_args()
 
